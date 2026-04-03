@@ -15,7 +15,6 @@ func main() {
 
 	fmt.Printf("Loaded config:\n")
 	fmt.Printf("  Listen: %s\n", cfg.ListenAddr)
-	fmt.Printf("  Admin: %s\n", cfg.AdminAddr)
 	fmt.Printf("  Balancer: %s\n", cfg.Balancer)
 	fmt.Printf("  Backends: %d\n", len(cfg.Backends))
 

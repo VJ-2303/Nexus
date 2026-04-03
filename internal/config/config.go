@@ -46,6 +46,7 @@ type HealthConfig struct {
 type TransportConfig struct {
 	MaxIdleConns        int           `yaml:"max_idle_conns"`
 	MaxIdleConnsPerHost int           `yaml:"max_idle_conns_per_host"`
+	MaxConnsPerHost     int           `yaml:"max_conns_per_host"`
 	IdleConnTimeout     time.Duration `yaml:"idle_conn_timeout"`
 	ResponseTimeout     time.Duration `yaml:"response_timeout"`
 }
@@ -81,6 +82,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Health.FailThreshold < 1 {
 		c.Health.FailThreshold = 3
+	}
+	if c.Transport.MaxConnsPerHost < 1 {
+		c.Transport.MaxConnsPerHost = 50
 	}
 	return nil
 }

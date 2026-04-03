@@ -1,5 +1,4 @@
 listen_addr: ":8080"
-admin_addr: ":9090"
 balancer: "roundrobin"
 log_level: "info"
 
@@ -8,6 +7,7 @@ backends:
     weight: 1
   - url: "http://localhost:8082"
     weight: 2
+
 health:
   interval: 10s
   timeout: 5s

@@ -718,10 +718,10 @@ go mod tidy
 package main
 
 import (
-01-foundation-and-config.md "fmt"
-01-foundation-and-config.md "log"
+ "fmt"
+ "log"
 
-01-foundation-and-config.md "github.com/VJ-2303/nexus/internal/config"
+ "github.com/VJ-2303/nexus/internal/config"
 )
 ```
 
@@ -739,10 +739,10 @@ import (
 Add main function:
 ```go
 func main() {
-01-foundation-and-config.md cfg, err := config.Load("config.yaml")
-01-foundation-and-config.md if err != nil {
-01-foundation-and-config.md 01-foundation-and-config.md log.Fatalf("Failed to load config: %v", err)
-01-foundation-and-config.md }
+ cfg, err := config.Load("config.yaml")
+ if err != nil {
+  log.Fatalf("Failed to load config: %v", err)
+ }
 ```
 
 **Why check `err` immediately?**
@@ -762,11 +762,11 @@ func main() {
 
 Add printing logic:
 ```go
-01-foundation-and-config.md fmt.Printf("Loaded config:\n")
-01-foundation-and-config.md fmt.Printf("  Listen: %s\n", cfg.ListenAddr)
-01-foundation-and-config.md fmt.Printf("  Admin: %s\n", cfg.AdminAddr)
-01-foundation-and-config.md fmt.Printf("  Balancer: %s\n", cfg.Balancer)
-01-foundation-and-config.md fmt.Printf("  Backends: %d\n", len(cfg.Backends))
+ fmt.Printf("Loaded config:\n")
+ fmt.Printf("  Listen: %s\n", cfg.ListenAddr)
+ fmt.Printf("  Admin: %s\n", cfg.AdminAddr)
+ fmt.Printf("  Balancer: %s\n", cfg.Balancer)
+ fmt.Printf("  Backends: %d\n", len(cfg.Backends))
 ```
 
 **Why `fmt.Printf` here?**
@@ -782,9 +782,9 @@ Add printing logic:
 
 Add backend details:
 ```go
-01-foundation-and-config.md for i, b := range cfg.Backends {
-01-foundation-and-config.md 01-foundation-and-config.md fmt.Printf("    [%d] %s (weight: %d)\n", i, b.URL, b.Weight)
-01-foundation-and-config.md }
+ for i, b := range cfg.Backends {
+  fmt.Printf("    [%d] %s (weight: %d)\n", i, b.URL, b.Weight)
+ }
 ```
 
 **What's `range`?**
@@ -798,7 +798,7 @@ Add backend details:
 
 Add health info:
 ```go
-01-foundation-and-config.md fmt.Printf("  Health check interval: %v\n", cfg.Health.Interval)
+ fmt.Printf("  Health check interval: %v\n", cfg.Health.Interval)
 }
 ```
 

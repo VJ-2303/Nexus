@@ -1,3 +1,5 @@
 module github.com/VJ-2303/Nexus
 
 go 1.26.1
+
+require gopkg.in/yaml.v3 v3.0.1

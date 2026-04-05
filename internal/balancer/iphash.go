@@ -26,7 +26,7 @@ func (ih *IPHash) Next(backends []*backend.Backend, r *http.Request) *backend.Ba
 
 	hash := hashIP(ip)
 
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		idx := (hash + i) % n
 		b := backends[idx]
 		if b.IsAlive() {

@@ -2,12 +2,14 @@ package proxy
 
 import (
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 
 	"github.com/VJ-2303/Nexus/internal/backend"
 	"github.com/VJ-2303/Nexus/internal/balancer"
 	"github.com/VJ-2303/Nexus/internal/config"
+	"github.com/VJ-2303/Nexus/internal/middleware"
 )
 
 var hopByHopHeaders = []string{
@@ -25,9 +27,10 @@ type Proxy struct {
 	backends []*backend.Backend
 	balancer balancer.Balancer
 	client   *http.Client
+	logger   *slog.Logger
 }
 
-func New(cfg *config.Config, backends []*backend.Backend, bal balancer.Balancer) *Proxy {
+func New(cfg *config.Config, backends []*backend.Backend, bal balancer.Balancer, logger *slog.Logger) *Proxy {
 	transport := &http.Transport{
 		MaxIdleConns:        cfg.Transport.MaxIdleConns,
 		MaxIdleConnsPerHost: cfg.Transport.MaxIdleConnsPerHost,
@@ -42,12 +45,17 @@ func New(cfg *config.Config, backends []*backend.Backend, bal balancer.Balancer)
 		backends: backends,
 		balancer: bal,
 		client:   client,
+		logger:   logger,
 	}
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	reqID := middleware.GetRequestID(r.Context())
+	logger := p.logger.With("request_id", reqID)
+
 	b := p.balancer.Next(p.backends, r)
 	if b == nil {
+		logger.Error("no healthy backends available")
 		http.Error(w, "Service Unavailable: no healthy backends", http.StatusServiceUnavailable)
 		return
 	}
@@ -60,6 +68,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL.String(), r.Body)
 	if err != nil {
+		logger.Error("failed to create proxy request", "error", err)
 		http.Error(w, "internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -73,6 +82,10 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := p.client.Do(proxyReq)
 	if err != nil {
+		logger.Error("backend request failed",
+			"backend_url", b.URL.String(),
+			"error", err,
+		)
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		return
 	}

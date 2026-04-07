@@ -2,13 +2,15 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 
 	"github.com/VJ-2303/Nexus/internal/backend"
 	"github.com/VJ-2303/Nexus/internal/balancer"
 	"github.com/VJ-2303/Nexus/internal/config"
 	"github.com/VJ-2303/Nexus/internal/health"
+	"github.com/VJ-2303/Nexus/internal/logger"
+	"github.com/VJ-2303/Nexus/internal/middleware"
 	"github.com/VJ-2303/Nexus/internal/proxy"
 	"github.com/VJ-2303/Nexus/internal/server"
 )
@@ -21,37 +23,61 @@ func main() {
 	}
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
-		log.Fatal(err)
+		slog.Error("failed to load config", "error", err)
+		os.Exit(1)
 	}
-	log.Printf("[nexus] Configuration loaded from %s", cfgPath)
+
+	log, err := logger.New(cfg.Logging)
+	if err != nil {
+		slog.Error("failed to create logger", "error", err)
+		os.Exit(1)
+	}
+
+	log.Info("configuration loaded",
+		"path", cfgPath,
+		"listen_addr", cfg.ListenAddr,
+	)
 
 	backends := make([]*backend.Backend, len(cfg.Backends))
 	for i, bcfg := range cfg.Backends {
 		b, err := backend.New(bcfg.URL, bcfg.Weight)
 		if err != nil {
-			log.Fatal(err)
+			log.Error("failed to create backend",
+				"index", i,
+				"url", bcfg.URL,
+				"error", err,
+			)
+			os.Exit(1)
 		}
 		backends[i] = b
-		log.Printf("[nexus] Backend %d: %s (weight=%d)", i, bcfg.URL, bcfg.Weight)
+		log.Info("backend initialized",
+			"index", i,
+			"url", bcfg.URL,
+			"weight", bcfg.Weight,
+		)
 	}
 
 	bal, err := balancer.New(cfg.Balancer)
 	if err != nil {
-		log.Fatal(err)
+		log.Error("failed to create balancer", "algorithm", cfg.Balancer, "error", err)
+		os.Exit(1)
 	}
-	log.Printf("[nexus] Balancer: %s", cfg.Balancer)
 
-	px := proxy.New(cfg, backends, bal)
+	log.Info("balancer initialized", "algorithm", cfg.Balancer)
+
+	px := proxy.New(cfg, backends, bal, log)
+
+	handler := middleware.RequestLogger(log)(px)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	checker := health.NewChecker(backends, cfg.Health)
+	checker := health.NewChecker(backends, cfg.Health, log)
 	go checker.Run(ctx)
 
-	log.Printf("[nexus] Starting Nexus on %s", cfg.ListenAddr)
-	srv := server.New(cfg.ListenAddr, px)
+	srv := server.New(cfg.ListenAddr, handler, log)
 	if err := srv.Run(); err != nil {
-		log.Fatalf("Server error: %v", err)
+		log.Error("server error", "error", err)
+		os.Exit(1)
 	}
 }

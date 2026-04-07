@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -8,20 +9,27 @@ import (
 	"github.com/google/uuid"
 )
 
+type contextKey string
+
+const requestIDKey contextKey = "request_id"
+
 func RequestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			requestID := uuid.New().String()
-
 			start := time.Now()
+
+			ctx := context.WithValue(r.Context(), requestIDKey, requestID)
+			r = r.WithContext(ctx)
+
+			reqLogger := logger.With("request_id", requestID)
 
 			rw := &responseWriter{
 				ResponseWriter: w,
 				statusCode:     http.StatusOK,
 			}
 
-			logger.Info("request started",
-				"request_id", requestID,
+			reqLogger.Info("request started",
 				"method", r.Method,
 				"path", r.URL.Path,
 				"remote_addr", r.RemoteAddr,
@@ -30,8 +38,7 @@ func RequestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 			next.ServeHTTP(rw, r)
 
 			duration := time.Since(start)
-			logger.Info("request completed",
-				"request_id", requestID,
+			reqLogger.Info("request completed",
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", rw.statusCode,
@@ -40,6 +47,13 @@ func RequestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 			)
 		})
 	}
+}
+
+func GetRequestID(ctx context.Context) string {
+	if id, ok := ctx.Value(requestIDKey).(string); ok {
+		return id
+	}
+	return ""
 }
 
 type responseWriter struct {

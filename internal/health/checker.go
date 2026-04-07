@@ -2,7 +2,7 @@ package health
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -16,9 +16,10 @@ type Checker struct {
 	interval      time.Duration
 	passThreshold int
 	failThreshold int
+	logger        *slog.Logger
 }
 
-func NewChecker(backends []*backend.Backend, cfg config.HealthConfig) *Checker {
+func NewChecker(backends []*backend.Backend, cfg config.HealthConfig, logger *slog.Logger) *Checker {
 	return &Checker{
 		backends: backends,
 		client: &http.Client{
@@ -27,6 +28,7 @@ func NewChecker(backends []*backend.Backend, cfg config.HealthConfig) *Checker {
 		interval:      cfg.Interval,
 		passThreshold: cfg.PassThreshold,
 		failThreshold: cfg.FailThreshold,
+		logger:        logger,
 	}
 }
 
@@ -34,14 +36,16 @@ func (c *Checker) Run(ctx context.Context) {
 	ticker := time.NewTicker(c.interval)
 	defer ticker.Stop()
 
-	log.Printf("[health] Starting health checker (interval=%v, pass=%d, fail=%d)", c.interval, c.passThreshold, c.failThreshold)
+	c.logger.Info("health checker started",
+		"interval", c.interval.Seconds(),
+	)
 
 	c.checkAll()
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("[health] Health checker stopped")
+			c.logger.Info("health checker stopped")
 		case <-ticker.C:
 			c.checkAll()
 		}
@@ -58,7 +62,7 @@ func (c *Checker) checkAll() {
 			if !b.IsAlive() {
 				status = "DOWN"
 			}
-			log.Printf("[health] Backend %s is now %s", b.URL.String(), status)
+			c.logger.Warn("backend state change", "url", b.URL.String(), "status", status)
 		}
 	}
 }

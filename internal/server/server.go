@@ -3,7 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,9 +13,10 @@ import (
 
 type Server struct {
 	httpServer *http.Server
+	logger     *slog.Logger
 }
 
-func New(addr string, handler http.Handler) *Server {
+func New(addr string, handler http.Handler, logger *slog.Logger) *Server {
 	return &Server{
 		httpServer: &http.Server{
 			Addr:         addr,
@@ -24,6 +25,7 @@ func New(addr string, handler http.Handler) *Server {
 			WriteTimeout: 30 * time.Second,
 			IdleTimeout:  60 * time.Second,
 		},
+		logger: logger,
 	}
 }
 
@@ -34,7 +36,7 @@ func (s *Server) Run() error {
 	errChan := make(chan error, 1)
 
 	go func() {
-		log.Printf("Nexus listening on %s", s.httpServer.Addr)
+		s.logger.Info("Nexus server started", "listen_addr", s.httpServer.Addr)
 		if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			errChan <- err
 		}
@@ -42,8 +44,9 @@ func (s *Server) Run() error {
 
 	select {
 	case sig := <-sigChan:
-		log.Printf("Received signal %v, shutting down...", sig)
+		s.logger.Info("Shutdown signal received", "signal", sig)
 	case err := <-errChan:
+		s.logger.Error("server error", "error", err)
 		return fmt.Errorf("server error: %w", err)
 	}
 
@@ -51,8 +54,9 @@ func (s *Server) Run() error {
 	defer cancel()
 
 	if err := s.httpServer.Shutdown(ctx); err != nil {
+		s.logger.Error("graceful shutdown failed", "error", err)
 		return fmt.Errorf("graceful shutdown failed: %w", err)
 	}
-	log.Println("Server stopped gracefully")
+	s.logger.Info("Nexus server stopped")
 	return nil
 }

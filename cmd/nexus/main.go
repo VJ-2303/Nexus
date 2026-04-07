@@ -32,7 +32,7 @@ func main() {
 			log.Fatal(err)
 		}
 		backends[i] = b
-		log.Printf("[nexus Backend %d: %s (weight=%d)]", i, bcfg.URL, bcfg.Weight)
+		log.Printf("[nexus] Backend %d: %s (weight=%d)", i, bcfg.URL, bcfg.Weight)
 	}
 
 	bal, err := balancer.New(cfg.Balancer)

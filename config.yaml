@@ -1,6 +1,10 @@
 listen_addr: ":8080"
 balancer: "roundrobin"
-log_level: "info"
+
+logging:
+  level: "info"
+  format: "json"
+  add_source: false
 
 backends:
   - url: "http://localhost:8081"

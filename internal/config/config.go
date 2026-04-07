@@ -25,10 +25,16 @@ var (
 type Config struct {
 	ListenAddr string          `yaml:"listen_addr"`
 	Balancer   string          `yaml:"balancer"`
-	LogLevel   string          `yaml:"log_level"`
+	Logging    LoggingConfig   `yaml:"logging"`
 	Backends   []BackendConfig `yaml:"backends"`
 	Health     HealthConfig    `yaml:"health"`
 	Transport  TransportConfig `yaml:"transport"`
+}
+
+type LoggingConfig struct {
+	Level     string `yaml:"level"`
+	Format    string `yaml:"format"`
+	AddSource bool   `yaml:"add_source"`
 }
 
 type BackendConfig struct {
@@ -101,8 +107,11 @@ func (c *Config) applyDefaults() {
 	if c.Balancer == "" {
 		c.Balancer = "roundrobin"
 	}
-	if c.LogLevel == "" {
-		c.LogLevel = "info"
+	if c.Logging.Level == "" {
+		c.Logging.Level = "info"
+	}
+	if c.Logging.Format == "" {
+		c.Logging.Format = "json"
 	}
 
 	if c.Health.Interval == 0 {

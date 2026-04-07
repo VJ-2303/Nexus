@@ -1,93 +1,75 @@
 package proxy
 
 import (
-	"fmt"
 	"io"
+	"net"
 	"net/http"
-	"net/url"
-	"sync"
 
+	"github.com/VJ-2303/Nexus/internal/backend"
+	"github.com/VJ-2303/Nexus/internal/balancer"
 	"github.com/VJ-2303/Nexus/internal/config"
 )
 
-type Backend struct {
-	URL    *url.URL
-	Alive  bool
-	Weight int
+var hopByHopHeaders = []string{
+	"Connection",
+	"Keep-Alive",
+	"Proxy-Authenticate",
+	"Proxy-Authorization",
+	"Te",
+	"Trailer",
+	"Transfer-Encoding",
+	"Upgrade",
 }
 
 type Proxy struct {
-	backends []*Backend
-	mu       sync.RWMutex
+	backends []*backend.Backend
+	balancer balancer.Balancer
 	client   *http.Client
 }
 
-func New(cfg *config.Config) (*Proxy, error) {
-	if len(cfg.Backends) == 0 {
-		return nil, fmt.Errorf("no backend provided")
-	}
-	backends := make([]*Backend, len(cfg.Backends))
-	for i, backend := range cfg.Backends {
-		u, err := url.Parse(backend.URL)
-		if err != nil {
-			return nil, fmt.Errorf("parsing backend URL %q: %w", backend.URL, err)
-		}
-		backends[i] = &Backend{
-			URL:    u,
-			Alive:  true,
-			Weight: backend.Weight,
-		}
+func New(cfg *config.Config, backends []*backend.Backend, bal balancer.Balancer) *Proxy {
+	transport := &http.Transport{
+		MaxIdleConns:        cfg.Transport.MaxIdleConns,
+		MaxIdleConnsPerHost: cfg.Transport.MaxIdleConnsPerHost,
+		MaxConnsPerHost:     cfg.Transport.MaxConnsPerHost,
+		IdleConnTimeout:     cfg.Transport.IdleConnTimeout,
 	}
 	client := &http.Client{
-		Timeout: cfg.Transport.ResponseTimeout,
-		Transport: &http.Transport{
-			MaxIdleConns:        cfg.Transport.MaxIdleConns,
-			MaxIdleConnsPerHost: cfg.Transport.MaxIdleConnsPerHost,
-			IdleConnTimeout:     cfg.Transport.IdleConnTimeout,
-		},
+		Timeout:   cfg.Transport.ResponseTimeout,
+		Transport: transport,
 	}
 	return &Proxy{
 		backends: backends,
+		balancer: bal,
 		client:   client,
-	}, nil
+	}
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	backend := p.getNextBackend()
-	if backend == nil {
-		http.Error(w, "no healthy backends", http.StatusServiceUnavailable)
+	b := p.balancer.Next(p.backends, r)
+	if b == nil {
+		http.Error(w, "Service Unavailable: no healthy backends", http.StatusServiceUnavailable)
 		return
 	}
-	targetURL := backend.URL.ResolveReference(r.URL)
+	b.IncrementConns()
+	defer b.DecrementConns()
 
-	proxyReq, err := http.NewRequest(r.Method, targetURL.String(), r.Body)
+	targetURL := *b.URL
+	targetURL.Path = r.URL.Path
+	targetURL.RawQuery = r.URL.RawQuery
+
+	proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL.String(), r.Body)
 	if err != nil {
-		http.Error(w, "failed to create request", http.StatusInternalServerError)
+		http.Error(w, "internal Server Error", http.StatusInternalServerError)
 		return
 	}
+	copyHeaders(proxyReq.Header, r.Header)
 
-	for key, values := range r.Header {
-		for _, value := range values {
-			proxyReq.Header.Add(key, value)
-		}
-	}
-	proxyReq.Header.Set("X-Forwarded-For", r.RemoteAddr)
-	proxyReq.Header.Set("X-Real_IP", r.RemoteAddr)
-
-	if r.TLS != nil {
-		proxyReq.Header.Set("X-Forwarded-Proto", "https")
-	} else {
-		proxyReq.Header.Set("X-Forwarded-Proto", "http")
+	for _, h := range hopByHopHeaders {
+		proxyReq.Header.Del(h)
 	}
 
-	// Strip hop-by-hop headers
-	proxyReq.Header.Del("Connection")
-	proxyReq.Header.Del("Keep-Alive")
-	proxyReq.Header.Del("Proxy-Authorization")
-	proxyReq.Header.Del("Proxy-Authenticate")
-	proxyReq.Header.Del("Trailer")
-	proxyReq.Header.Del("Transfer-Encoding")
-	proxyReq.Header.Del("Upgrade")
+	setForwardedHeaders(proxyReq, r)
 
 	resp, err := p.client.Do(proxyReq)
 	if err != nil {
@@ -96,10 +78,10 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
-	for key, values := range resp.Header {
-		for _, value := range values {
-			w.Header().Add(key, value)
-		}
+	copyHeaders(w.Header(), resp.Header)
+
+	for _, h := range hopByHopHeaders {
+		proxyReq.Header.Del(h)
 	}
 
 	w.WriteHeader(resp.StatusCode)
@@ -107,14 +89,38 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, resp.Body)
 }
 
-func (p *Proxy) getNextBackend() *Backend {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	for _, backend := range p.backends {
-		if backend.Alive {
-			return backend
+func copyHeaders(dst, src http.Header) {
+	for key, values := range src {
+		for _, value := range values {
+			dst.Add(key, value)
 		}
 	}
-	return nil
+}
+
+func setForwardedHeaders(proxyReq *http.Request, originalReq *http.
+	Request) {
+	clientIP := extractClientIP(originalReq)
+	if prior := originalReq.Header.Get("X-Forwarded-For"); prior != "" {
+		clientIP = prior + ", " + clientIP
+	}
+	proxyReq.Header.Set("X-Forwarded-For", clientIP)
+
+	proxyReq.Header.Set("X-Real-IP", extractClientIP(originalReq))
+
+	proto := "http"
+	if originalReq.TLS != nil {
+		proto = "https"
+	}
+	proxyReq.Header.Set("X-Forwarded-Proto", proto)
+
+	proxyReq.Header.Set("X-Forwarded-Host", originalReq.Host)
+}
+
+// extractClientIP gets the client IP from RemoteAddr, stripping the port.
+func extractClientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
